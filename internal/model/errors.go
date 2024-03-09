@@ -3,12 +3,11 @@ package model
 import (
 	"errors"
 	"fmt"
+
 	"github.com/google/uuid"
 )
 
-var (
-	ErrObjectAlreadyExists = errors.New("err duplicate request")
-)
+var ErrObjectAlreadyExists = errors.New("err duplicate request")
 
 type ErrDuplicateReservation struct {
 	ReservationID uuid.UUID

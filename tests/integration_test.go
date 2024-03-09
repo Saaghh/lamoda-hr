@@ -5,6 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os/signal"
+	"strconv"
+	"syscall"
+	"testing"
+	"time"
+
 	"github.com/Saaghh/lamoda-hr/internal/apiserver"
 	"github.com/Saaghh/lamoda-hr/internal/config"
 	"github.com/Saaghh/lamoda-hr/internal/logger"
@@ -15,12 +22,6 @@ import (
 	migrate "github.com/rubenv/sql-migrate"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
-	"net/http"
-	"os/signal"
-	"strconv"
-	"syscall"
-	"testing"
-	"time"
 )
 
 const (
@@ -93,7 +94,7 @@ func (s *IntegrationTestSuite) TearDownSuite() {
 func (s *IntegrationTestSuite) createTestData() {
 	s.T().Helper()
 
-	//create warehouses
+	// create warehouses
 	for i := 0; i < 3; i++ {
 		wh, err := s.str.CreateWarehouse(s.ctx, model.Warehouse{
 			ID:       uuid.New(),
@@ -106,7 +107,7 @@ func (s *IntegrationTestSuite) createTestData() {
 		s.warehouses = append(s.warehouses, *wh)
 	}
 
-	//create products
+	// create products
 	for i := 0; i < 3; i++ {
 		pd, err := s.str.CreateProduct(s.ctx, model.Product{
 			Name: "Футболка #" + strconv.Itoa(i*i),
@@ -119,7 +120,7 @@ func (s *IntegrationTestSuite) createTestData() {
 		s.products = append(s.products, *pd)
 	}
 
-	//create stocks
+	// create stocks
 	for _, wh := range s.warehouses {
 		for _, pd := range s.products {
 			_, err := s.str.CreateStock(s.ctx, model.Stock{
@@ -226,7 +227,6 @@ func (s *IntegrationTestSuite) TestReservations() {
 		})
 
 		s.Run("200/outdated transaction", func() {
-
 			requestReservations := []model.Reservation{
 				{
 					ID:          uuid.New(),
@@ -266,9 +266,7 @@ func (s *IntegrationTestSuite) TestReservations() {
 				nil)
 
 			s.Require().Equal(http.StatusCreated, resp.StatusCode)
-
 		})
-
 	})
 
 	s.Run("DELETE:/reservations", func() {
@@ -312,9 +310,9 @@ func (s *IntegrationTestSuite) sendRequest(ctx context.Context, method, endpoint
 	resp, err := http.DefaultClient.Do(req)
 	s.Require().NoError(err)
 
-	//resultString, err := io.ReadAll(resp.Body)
-	//s.Require().NoError(err)
-	//s.Require().NotNil(resultString)
+	// resultString, err := io.ReadAll(resp.Body)
+	// s.Require().NoError(err)
+	// s.Require().NotNil(resultString)
 
 	defer func() {
 		err = resp.Body.Close()

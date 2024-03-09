@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"os/signal"
+	"syscall"
+
 	"github.com/Saaghh/lamoda-hr/internal/apiserver"
 	"github.com/Saaghh/lamoda-hr/internal/config"
 	"github.com/Saaghh/lamoda-hr/internal/logger"
@@ -9,8 +12,6 @@ import (
 	"github.com/Saaghh/lamoda-hr/internal/store"
 	migrate "github.com/rubenv/sql-migrate"
 	"go.uber.org/zap"
-	"os/signal"
-	"syscall"
 )
 
 func main() {
@@ -47,5 +48,4 @@ func main() {
 	if err = server.Run(ctx); err != nil {
 		zap.L().With(zap.Error(err)).Panic("main/server.Run(ctx)")
 	}
-
 }

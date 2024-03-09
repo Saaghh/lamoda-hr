@@ -2,13 +2,12 @@ package apiserver
 
 import (
 	"context"
-	"crypto/rsa"
 	"errors"
 	"fmt"
-	"github.com/go-chi/chi/v5"
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
@@ -17,7 +16,6 @@ type APIServer struct {
 	cfg     Config
 	server  *http.Server
 	service service
-	key     *rsa.PublicKey
 }
 
 type Config struct {
@@ -78,7 +76,6 @@ func (s *APIServer) configRouter() {
 	zap.L().Debug("configuring router")
 
 	s.router.Route("/api", func(r chi.Router) {
-
 		r.Route("/v1", func(r chi.Router) {
 			r.Post("/reservations", s.createReservations)
 			r.Delete("/reservations", s.deleteReservations)
@@ -87,5 +84,4 @@ func (s *APIServer) configRouter() {
 			r.Get("/stocks", s.getStocks)
 		})
 	})
-
 }

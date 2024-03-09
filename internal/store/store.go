@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
-	"github.com/Saaghh/lamoda-hr/internal/config"
 	"net/url"
 
+	"github.com/Saaghh/lamoda-hr/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	migrate "github.com/rubenv/sql-migrate"

@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+
 	"github.com/Saaghh/lamoda-hr/internal/model"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
-	"net/http"
 )
 
 type HTTPResponse struct {
@@ -20,7 +21,7 @@ type service interface {
 	CreateReservations(ctx context.Context, reservations []model.Reservation) (*[]model.Reservation, error)
 	DeleteReservations(ctx context.Context, reservations []model.Reservation) error
 
-	//TODO: pagination, filtration, sorting
+	// TODO: pagination, filtration, sorting
 	GetWarehouseStocks(ctx context.Context, warehouseID uuid.UUID) (*[]model.Stock, error)
 	GetStocks(ctx context.Context) (*[]model.Stock, error)
 }

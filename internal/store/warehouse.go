@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/Saaghh/lamoda-hr/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgerrcode"
@@ -94,7 +95,6 @@ func (p *Postgres) CreateProduct(ctx context.Context, product model.Product) (*m
 	).Scan(
 		&product.CreatedAt,
 	)
-
 	if err != nil {
 		return nil, fmt.Errorf("p.db.QueryRow(%s): %w", query, err)
 	}
@@ -118,7 +118,6 @@ func (p *Postgres) CreateStock(ctx context.Context, stock model.Stock) (*model.S
 		&stock.CreatedAt,
 		&stock.ModifiedAt,
 	)
-
 	if err != nil {
 		return nil, fmt.Errorf("p.db.QueryRow(%s): %w", query, err)
 	}
@@ -242,19 +241,17 @@ func (p *Postgres) DeactivateDueReservations(ctx context.Context) error {
 	RETURNING product_id, warehouse_id, quantity`
 
 	func() {
-
 	}()
 	rows, err := tx.Query(
 		ctx,
 		query)
-
-	defer rows.Close()
-
 	if err != nil {
 		return fmt.Errorf("tx.Query(%s): %w", query, err)
 	}
 
-	var releasedReservations = make([]model.Reservation, 0)
+	defer rows.Close()
+
+	releasedReservations := make([]model.Reservation, 0)
 
 	for rows.Next() {
 		var releasedReservation model.Reservation
@@ -264,7 +261,6 @@ func (p *Postgres) DeactivateDueReservations(ctx context.Context) error {
 			&releasedReservation.WarehouseID,
 			&releasedReservation.Quantity,
 		)
-
 		if err != nil {
 			return fmt.Errorf("rows.Scan(&reservationQuantity): %w", err)
 		}
@@ -292,7 +288,6 @@ func (p *Postgres) DeactivateDueReservations(ctx context.Context) error {
 			value.ProductID,
 			value.WarehouseID,
 		).Scan(nil, nil)
-
 		if err != nil {
 			return fmt.Errorf("tx.QueryRow(%s): %w", query, err)
 		}
@@ -342,7 +337,11 @@ func (p *Postgres) DeleteReservations(ctx context.Context, reservations []model.
 			return fmt.Errorf("tx.QueryRow(%s): %w", query, err)
 		}
 
-		query = `UPDATE stocks SET quantity = quantity + $1, modified_at = now() WHERE warehouse_id = $2 AND product_id = $3`
+		query = `
+		UPDATE stocks 
+		SET quantity = quantity + $1, modified_at = now() 
+		WHERE warehouse_id = $2 AND product_id = $3
+		RETURNING modified_at`
 
 		err = tx.QueryRow(
 			ctx,
@@ -350,7 +349,10 @@ func (p *Postgres) DeleteReservations(ctx context.Context, reservations []model.
 			value.Quantity,
 			value.WarehouseID,
 			value.ProductID,
-		).Scan()
+		).Scan(nil)
+		if err != nil {
+			return fmt.Errorf("tx.QueryRow(...): %w", err)
+		}
 	}
 
 	if err = tx.Commit(ctx); err != nil {
@@ -362,7 +364,6 @@ func (p *Postgres) DeleteReservations(ctx context.Context, reservations []model.
 
 func (p *Postgres) GetWarehouseStocks(ctx context.Context, warehouseID uuid.UUID) (*[]model.Stock, error) {
 	err := p.DeactivateDueReservations(ctx)
-
 	if err != nil {
 		return nil, fmt.Errorf("p.DeactivateDueReservations(ctx): %w", err)
 	}
@@ -373,7 +374,6 @@ func (p *Postgres) GetWarehouseStocks(ctx context.Context, warehouseID uuid.UUID
 		ctx,
 		query,
 		warehouseID)
-
 	if err != nil {
 		return nil, fmt.Errorf("p.db.Query(%s): %w", query, err)
 	}
@@ -402,6 +402,6 @@ func (p *Postgres) GetWarehouseStocks(ctx context.Context, warehouseID uuid.UUID
 }
 
 func (p *Postgres) GetStocks(ctx context.Context) (*[]model.Stock, error) {
-	//TODO implement me
+	// TODO implement me
 	panic("implement me")
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+
 	"github.com/Saaghh/lamoda-hr/internal/model"
 	"github.com/google/uuid"
 )
@@ -29,7 +30,7 @@ func New(db store) *Service {
 }
 
 func (s *Service) CreateReservations(ctx context.Context, reservations []model.Reservation) (*[]model.Reservation, error) {
-	//TODO add validation
+	// TODO add validation
 
 	result, err := s.db.CreateReservations(ctx, reservations)
 	if err != nil {
@@ -58,6 +59,6 @@ func (s *Service) GetWarehouseStocks(ctx context.Context, warehouseID uuid.UUID)
 }
 
 func (s *Service) GetStocks(ctx context.Context) (*[]model.Stock, error) {
-	//TODO implement me
+	// TODO implement me
 	panic("implement me")
 }
