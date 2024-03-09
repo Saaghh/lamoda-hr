@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  pg:
+    image: postgres:latest
+    container_name: lamoda_postgres
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: secret
+    ports:
+      - '5432:5432'
+    command: ['postgres', '-c', 'log_statement=all']
