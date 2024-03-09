@@ -29,10 +29,18 @@ func (e ErrStockNotFound) Error() string {
 
 type ErrNotEnoughQuantity struct {
 	SKU              string
+	WarehouseID      uuid.UUID
 	RequiredQuantity uint
-	ActualQuantity   uint
 }
 
 func (e ErrNotEnoughQuantity) Error() string {
-	return fmt.Sprintf("err not enough quantity of %s. Required: %d; Found: %d", e.SKU, e.RequiredQuantity, e.ActualQuantity)
+	return fmt.Sprintf("err quantity of %s less than %d at %s", e.SKU, e.RequiredQuantity, e.WarehouseID.String())
+}
+
+type ErrReservationNotFound struct {
+	ReservationID uuid.UUID
+}
+
+func (e ErrReservationNotFound) Error() string {
+	return fmt.Sprintf("err reservation %s not found", e.ReservationID.String())
 }

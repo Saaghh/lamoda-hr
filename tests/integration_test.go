@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/Saaghh/lamoda-hr/internal/apiserver"
 	"github.com/Saaghh/lamoda-hr/internal/config"
 	"github.com/Saaghh/lamoda-hr/internal/logger"
@@ -33,8 +34,9 @@ type IntegrationTestSuite struct {
 
 	ctx context.Context
 
-	warehouses []model.Warehouse
-	products   []model.Product
+	warehouses   []model.Warehouse
+	products     []model.Product
+	reservations []model.Reservation
 }
 
 func TestIntegrationTestSuite(t *testing.T) {
@@ -133,51 +135,167 @@ func (s *IntegrationTestSuite) createTestData() {
 
 func (s *IntegrationTestSuite) TestReservations() {
 	s.Run("POST:/reservations", func() {
-		requestReservations := []model.Reservation{
-			{
-				ID:          uuid.New(),
-				WarehouseID: s.warehouses[0].ID,
-				ProductID:   s.products[0].SKU,
-				Quantity:    90,
-				DueDate:     time.Now().Add(time.Hour * 24 * 30),
-			},
-		}
-		resultReservations := make([]model.Reservation, 0)
+		s.Run("200", func() {
+			requestReservations := []model.Reservation{
+				{
+					ID:          uuid.New(),
+					WarehouseID: s.warehouses[0].ID,
+					ProductID:   s.products[0].SKU,
+					Quantity:    50,
+					DueDate:     time.Now().Add(time.Hour * 24 * 30),
+				},
+				{
+					ID:          uuid.New(),
+					WarehouseID: s.warehouses[0].ID,
+					ProductID:   s.products[1].SKU,
+					Quantity:    50,
+					DueDate:     time.Now().Add(time.Hour * 24 * 30),
+				},
+				{
+					ID:          uuid.New(),
+					WarehouseID: s.warehouses[0].ID,
+					ProductID:   s.products[2].SKU,
+					Quantity:    50,
+					DueDate:     time.Now().Add(time.Hour * 24 * 30),
+				},
+			}
+			s.reservations = make([]model.Reservation, 0)
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				reservationsEndpoint,
+				requestReservations,
+				&apiserver.HTTPResponse{Data: &s.reservations})
+
+			s.Require().Equal(http.StatusCreated, resp.StatusCode)
+			s.Require().Equal(3, len(s.reservations))
+
+			s.Run("429", func() {
+				resp = s.sendRequest(
+					context.Background(),
+					http.MethodPost,
+					reservationsEndpoint,
+					requestReservations,
+					nil)
+
+				s.Require().Equal(http.StatusTooManyRequests, resp.StatusCode)
+			})
+		})
+
+		s.Run("422", func() {
+			requestReservations := []model.Reservation{
+				{
+					ID:          uuid.New(),
+					WarehouseID: s.warehouses[0].ID,
+					ProductID:   s.products[0].SKU,
+					Quantity:    90,
+					DueDate:     time.Now().Add(time.Hour * 24 * 30),
+				},
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				reservationsEndpoint,
+				requestReservations,
+				nil)
+
+			s.Require().Equal(http.StatusUnprocessableEntity, resp.StatusCode)
+		})
+
+		s.Run("404", func() {
+			requestReservations := []model.Reservation{
+				{
+					ID:          uuid.New(),
+					WarehouseID: uuid.New(),
+					ProductID:   s.products[0].SKU,
+					Quantity:    1,
+					DueDate:     time.Now().Add(time.Hour * 24 * 30),
+				},
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				reservationsEndpoint,
+				requestReservations,
+				nil)
+
+			s.Require().Equal(http.StatusNotFound, resp.StatusCode)
+		})
+
+		s.Run("200/outdated transaction", func() {
+
+			requestReservations := []model.Reservation{
+				{
+					ID:          uuid.New(),
+					WarehouseID: s.warehouses[0].ID,
+					ProductID:   s.products[0].SKU,
+					Quantity:    50,
+					DueDate:     time.Now().Add(time.Second),
+				},
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				reservationsEndpoint,
+				requestReservations,
+				nil)
+
+			s.Require().Equal(http.StatusCreated, resp.StatusCode)
+
+			time.Sleep(time.Second * 2)
+
+			requestReservations = []model.Reservation{
+				{
+					ID:          uuid.New(),
+					WarehouseID: s.warehouses[0].ID,
+					ProductID:   s.products[0].SKU,
+					Quantity:    50,
+					DueDate:     time.Now().Add(time.Hour * 24 * 30),
+				},
+			}
+
+			resp = s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				reservationsEndpoint,
+				requestReservations,
+				nil)
+
+			s.Require().Equal(http.StatusCreated, resp.StatusCode)
+
+		})
+
+	})
+
+	s.Run("DELETE:/reservations", func() {
+		resp := s.sendRequest(
+			context.Background(),
+			http.MethodDelete,
+			reservationsEndpoint,
+			s.reservations,
+			nil,
+		)
+
+		s.Require().Equal(http.StatusNoContent, resp.StatusCode)
+	})
+
+	s.Run("GET:/warehouses/{id}/stocks", func() {
+		var stocks []model.Stock
 
 		resp := s.sendRequest(
 			context.Background(),
-			http.MethodPost,
-			reservationsEndpoint,
-			requestReservations,
-			&apiserver.HTTPResponse{Data: &resultReservations})
+			http.MethodGet,
+			fmt.Sprintf("/warehouses/%s/stocks", s.warehouses[0].ID.String()),
+			nil,
+			&apiserver.HTTPResponse{Data: &stocks})
 
-		s.Require().Equal(http.StatusCreated, resp.StatusCode)
-		s.Require().Equal(3, len(resultReservations))
+		s.Require().Equal(http.StatusOK, resp.StatusCode)
+		s.Require().Equal(3, len(stocks))
 	})
-
-	s.Run("POST:/reservations/2", func() {
-		requestReservations := []model.Reservation{
-			{
-				ID:          uuid.New(),
-				WarehouseID: s.warehouses[0].ID,
-				ProductID:   s.products[0].SKU,
-				Quantity:    90,
-				DueDate:     time.Now().Add(time.Hour * 24 * 30),
-			},
-		}
-		resultReservations := make([]model.Reservation, 0)
-
-		resp := s.sendRequest(
-			context.Background(),
-			http.MethodPost,
-			reservationsEndpoint,
-			requestReservations,
-			&apiserver.HTTPResponse{Data: &resultReservations})
-
-		s.Require().Equal(http.StatusCreated, resp.StatusCode)
-		s.Require().Equal(3, len(resultReservations))
-	})
-
 }
 
 func (s *IntegrationTestSuite) sendRequest(ctx context.Context, method, endpoint string, body interface{}, dest interface{}) *http.Response {

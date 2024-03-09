@@ -3,6 +3,7 @@ package apiserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/Saaghh/lamoda-hr/internal/model"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -33,7 +34,23 @@ func (s *APIServer) createReservations(w http.ResponseWriter, r *http.Request) {
 
 	reservations, err := s.service.CreateReservations(r.Context(), *reservations)
 
+	var errDupRes *model.ErrDuplicateReservation
+	var errStockNotFound *model.ErrStockNotFound
+	var errNotEnoughQuant *model.ErrNotEnoughQuantity
+
 	switch {
+	case errors.As(err, &errDupRes):
+		writeErrorResponse(w, http.StatusTooManyRequests, errDupRes.Error())
+
+		return
+	case errors.As(err, &errNotEnoughQuant):
+		writeErrorResponse(w, http.StatusUnprocessableEntity, errNotEnoughQuant.Error())
+
+		return
+	case errors.As(err, &errStockNotFound):
+		writeErrorResponse(w, http.StatusNotFound, errStockNotFound.Error())
+
+		return
 	case err != nil:
 		zap.L().With(zap.Error(err)).Warn("createReservations/s.service.CreateReservations(r.Context(), *reservations)")
 
@@ -54,7 +71,13 @@ func (s *APIServer) deleteReservations(w http.ResponseWriter, r *http.Request) {
 
 	err := s.service.DeleteReservations(r.Context(), *reservations)
 
+	var errReservationNotFound *model.ErrReservationNotFound
+
 	switch {
+	case errors.As(err, &errReservationNotFound):
+		writeErrorResponse(w, http.StatusNotFound, errReservationNotFound.Error())
+
+		return
 	case err != nil:
 		zap.L().With(zap.Error(err)).Warn("deleteReservations/s.service.DeleteReservations(r.Context(), *reservations)")
 

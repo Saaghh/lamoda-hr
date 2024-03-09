@@ -84,7 +84,7 @@ func (s *APIServer) configRouter() {
 			r.Delete("/reservations", s.deleteReservations)
 
 			r.Get("/warehouses/{id}/stocks", s.getWarehouseStocks)
-			r.Get("/stocks", nil)
+			r.Get("/stocks", s.getStocks)
 		})
 	})
 
