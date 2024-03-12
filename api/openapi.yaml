@@ -198,40 +198,36 @@ components:
 
     reservationForDeletion:
       type: object
+      required: [id]
       properties:
         id:
           type: string
           format: uuid
           example: ab7c9613-7439-43e3-a0dc-898116e6dd8f
-          required: true
     reservationForRequest:
       type: object
+      required: [id, productId, warehouseId, quantity, dueDate]
       properties:
         id:
           type: string
           format: uuid
           example: ab7c9613-7439-43e3-a0dc-898116e6dd8f
-          required: true
         productId:
           type: string
           format: sku
           example: ABCDEF123456
-          required: true
         warehouseId:
           type: string
           format: uuid
           example: a4522a50-155a-4044-a435-63f6972f634f
-          required: true
         quantity:
           type: integer
           format: uint
           example: 220
-          required: true
         dueDate:
           type: string
           format: date-time
           example: 2024-03-13T05:12:07.47933Z
-          required: true
     reservationForResponse:
       type: object
       properties:
