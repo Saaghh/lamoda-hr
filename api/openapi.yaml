@@ -1,0 +1,267 @@
+openapi: 3.0.3
+info:
+  title: Reservations Server
+  description: |-
+    This is a test project for lamoda. Api allows us to reserve stocks at warehouses, release those reservations and 
+    get a list of all reservations with necessary filters
+  contact:
+    email: ssa2g6mq@gmail.com
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080/api/v1
+tags:
+  - name: Stocks
+    description: Everything about actual products at warehouses
+  - name: Reservations
+    description: Everything about reserved stocks
+
+paths:
+  /createReservations:
+    post:
+      tags:
+        - Reservations
+      summary: Reserve some stocks for later use
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/createReservationsRequest'
+      responses:
+        '201':
+          description: Successful operations. All reservations from request were completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/createReservationsResponse'
+        '400':
+          description: Bad request. Read error message for more information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorResponse'
+        '429':
+          description: Duplicate request. Read error message to find first duplicate id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorResponse'
+        '422':
+          description: Not enough free quantity of product at warehouse. Read error message for more information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorResponse'
+        '404':
+          description: No such product at warehouse. Read error message for more information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorResponse'
+  /deleteReservations:
+    post:
+      tags:
+        - Reservations
+      summary: Delete existing reservations releasing stocks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/deleteReservationsRequest'
+      responses:
+        '204':
+          description: Successful operation. All reservations were successfully deleted
+        '400':
+          description: Bad request. Read error message for more information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorResponse'
+        '404':
+          description: Reservation was not found. Read error message for more information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorResponse'
+  /getStocks:
+    post:
+      tags:
+        - Stocks
+      summary: Getting information about stocks with necessary filters
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/getParams'
+      responses:
+        '200':
+          description: Successful request. Result might be empty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/getStockResponse'
+        '400':
+          description: Bad request. Read error message for more information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorResponse'
+
+
+
+
+components:
+  schemas:
+    getStockResponse:
+      type: array
+      items:
+        $ref: '#/components/schemas/stock'
+    stock:
+      type: object
+      properties:
+        warehouseId:
+          type: string
+          format: uuid
+          example: a4522a50-155a-4044-a435-63f6972f634f
+        productId:
+          type: string
+          format: sku
+          example: ABCDEF123456
+        quantity:
+          type: integer
+          format: uint
+          example: 1000
+          description: Actual amount of product existing at warehouse
+        reservedQuantity:
+          type: integer
+          format: uint
+          example: 320
+          description: Amount of product already reserved
+        createdAt:
+          type: string
+          format: date-time
+          example: 2024-03-13T05:12:07.47933Z
+        modifiedAt:
+          type: string
+          format: date-time
+          example: 2024-03-13T05:12:07.47933Z
+    getParams:
+      type: object
+      properties:
+        offset:
+          type: integer
+          example: 10
+          description: If not specified will be 0
+        limit:
+          type: integer
+          example: 100
+          description: If not specified will be 10
+        sorting:
+          type: string
+          enum:
+            - warehouse_id
+            - product_id
+            - quantity
+            - reserved_quantity
+            - created_at
+            - modified_at
+          description: Field which will be used for sorting results
+        descending:
+          type: boolean
+          example: true
+          description: Defines if sorting order will be descending. If not specified will be false. If sorting field not defined - will be ignored
+        warehouseFilter:
+          type: string
+          format: uuid
+          example: a4522a50-155a-4044-a435-63f6972f634f
+          description: Single warehouse which will be used for filtration
+        productFilter:
+          type: string
+          format: sku
+          example: ABCDEF123456
+          description: Single product which will be used for filtration
+    createReservationsRequest:
+      type: array
+      items:
+        $ref: '#/components/schemas/reservationForRequest'
+    createReservationsResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/reservationForResponse'
+    deleteReservationsRequest:
+      type: array
+      items:
+        $ref: '#/components/schemas/reservationForDeletion'
+
+
+    reservationForDeletion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: ab7c9613-7439-43e3-a0dc-898116e6dd8f
+          required: true
+    reservationForRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: ab7c9613-7439-43e3-a0dc-898116e6dd8f
+          required: true
+        productId:
+          type: string
+          format: sku
+          example: ABCDEF123456
+          required: true
+        warehouseId:
+          type: string
+          format: uuid
+          example: a4522a50-155a-4044-a435-63f6972f634f
+          required: true
+        quantity:
+          type: integer
+          format: uint
+          example: 220
+          required: true
+        dueDate:
+          type: string
+          format: date-time
+          example: 2024-03-13T05:12:07.47933Z
+          required: true
+    reservationForResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: a05317d0-4fb9-4bd7-9246-bd64134a3d61
+        productId:
+          type: string
+          format: sku
+          example: ABCDEF123456
+        warehouseId:
+          type: string
+          format: uuid
+          example: a4522a50-155a-4044-a435-63f6972f634f
+        quantity:
+          type: integer
+          format: uint
+          example: 220
+        dueDate:
+          type: string
+          format: date-time
+          example: 2025-03-13T05:12:07.47933Z
+        createdAt:
+          type: string
+          format: date-time
+          example: 2024-03-13T05:12:07.47933Z
+    errorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: error reading body
