@@ -1,9 +1,11 @@
 version: '3.8'
 
 services:
-  pg:
+  lamoda_postgres:
     image: postgres:latest
     container_name: lamoda_postgres
+    volumes:
+      - ./initdb:/docker-entrypoint-initdb.d
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: user
@@ -11,3 +13,14 @@ services:
     ports:
       - '5432:5432'
     command: ['postgres', '-c', 'log_statement=all']
+
+  apiserver:
+    build:
+      context: .
+      dockerfile: ./deployments/apiserver/Dockerfile
+    container_name: apiserver
+    depends_on:
+      - lamoda_postgres
+    ports:
+      - '8080:8080'
+    restart: always

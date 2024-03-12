@@ -38,17 +38,12 @@ func New(cfg Config, service service) *APIServer {
 }
 
 func (s *APIServer) Run(ctx context.Context) error {
-	zap.L().Debug("starting api server")
 	defer zap.L().Info("server stopped")
 
 	s.configRouter()
 
-	zap.L().Debug("configured router")
-
 	go func() {
 		<-ctx.Done()
-
-		zap.L().Debug("closing server")
 
 		gfCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -73,15 +68,12 @@ func (s *APIServer) Run(ctx context.Context) error {
 }
 
 func (s *APIServer) configRouter() {
-	zap.L().Debug("configuring router")
-
 	s.router.Route("/api", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
-			r.Post("/reservations", s.createReservations)
-			r.Delete("/reservations", s.deleteReservations)
+			r.Post("/createReservations", s.createReservations)
+			r.Post("/deleteReservations", s.deleteReservations)
 
-			r.Get("/warehouses/{id}/stocks", s.getWarehouseStocks)
-			r.Get("/stocks", s.getStocks)
+			r.Post("/getStocks", s.getStocks)
 		})
 	})
 }

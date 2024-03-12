@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os/signal"
 	"strconv"
@@ -25,8 +24,10 @@ import (
 )
 
 const (
-	bindAddr             = "http://localhost:8080/api/v1"
-	reservationsEndpoint = "/reservations"
+	bindAddr                   = "http://localhost:8081/api/v1"
+	createReservationsEndpoint = "/createReservations"
+	deleteReservationsEndpoint = "/deleteReservations"
+	getStocksEndpoint          = "/getStocks"
 )
 
 type IntegrationTestSuite struct {
@@ -37,7 +38,30 @@ type IntegrationTestSuite struct {
 
 	warehouses   []model.Warehouse
 	products     []model.Product
+	stocks       []model.Stock
 	reservations []model.Reservation
+}
+
+func (s *IntegrationTestSuite) TearDownSuite() {
+	for _, value := range s.reservations {
+		err := s.str.DeleteRow(context.Background(), value)
+		s.Require().NoError(err)
+	}
+
+	for _, value := range s.stocks {
+		err := s.str.DeleteRow(context.Background(), value)
+		s.Require().NoError(err)
+	}
+
+	for _, value := range s.products {
+		err := s.str.DeleteRow(context.Background(), value)
+		s.Require().NoError(err)
+	}
+
+	for _, value := range s.warehouses {
+		err := s.str.DeleteRow(context.Background(), value)
+		s.Require().NoError(err)
+	}
 }
 
 func TestIntegrationTestSuite(t *testing.T) {
@@ -51,7 +75,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	cfg := config.New()
 
-	logger.InitLogger(logger.Config{Level: cfg.LogLevel})
+	logger.InitLogger(logger.Config{Level: "warn"})
 
 	// no error handling for now
 	// check https://github.com/uber-go/zap/issues/991
@@ -71,24 +95,21 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	s.str = pgStore
 
+	s.createTestData()
+
 	serviceLayer := service.New(pgStore)
 
-	server := apiserver.New(
-		apiserver.Config{BindAddress: cfg.BindAddress},
-		serviceLayer,
-	)
+	server := apiserver.New(apiserver.Config{BindAddress: ":8081"}, serviceLayer)
 
 	go func() {
-		err := server.Run(context.Background())
+		err := server.Run(ctx)
 		s.Require().NoError(err)
 	}()
 
-	s.createTestData()
-}
-
-func (s *IntegrationTestSuite) TearDownSuite() {
-	err := s.str.TruncateTables(context.Background())
-	s.Require().NoError(err)
+	go func() {
+		err := serviceLayer.RunReservationsDeactivations(ctx, time.Second/10)
+		s.Require().NoError(err)
+	}()
 }
 
 func (s *IntegrationTestSuite) createTestData() {
@@ -123,20 +144,22 @@ func (s *IntegrationTestSuite) createTestData() {
 	// create stocks
 	for _, wh := range s.warehouses {
 		for _, pd := range s.products {
-			_, err := s.str.CreateStock(s.ctx, model.Stock{
+			stock, err := s.str.CreateStock(s.ctx, model.Stock{
 				WarehouseID: wh.ID,
 				ProductID:   pd.SKU,
 				Quantity:    100,
 			})
 
 			s.Require().NoError(err)
+
+			s.stocks = append(s.stocks, *stock)
 		}
 	}
 }
 
 func (s *IntegrationTestSuite) TestReservations() {
-	s.Run("POST:/reservations", func() {
-		s.Run("200", func() {
+	s.Run("POST:/createReservations", func() {
+		s.Run("201", func() {
 			requestReservations := []model.Reservation{
 				{
 					ID:          uuid.New(),
@@ -165,7 +188,7 @@ func (s *IntegrationTestSuite) TestReservations() {
 			resp := s.sendRequest(
 				context.Background(),
 				http.MethodPost,
-				reservationsEndpoint,
+				createReservationsEndpoint,
 				requestReservations,
 				&apiserver.HTTPResponse{Data: &s.reservations})
 
@@ -176,7 +199,7 @@ func (s *IntegrationTestSuite) TestReservations() {
 				resp = s.sendRequest(
 					context.Background(),
 					http.MethodPost,
-					reservationsEndpoint,
+					createReservationsEndpoint,
 					requestReservations,
 					nil)
 
@@ -184,7 +207,7 @@ func (s *IntegrationTestSuite) TestReservations() {
 			})
 		})
 
-		s.Run("422", func() {
+		s.Run("422/overbooking", func() {
 			requestReservations := []model.Reservation{
 				{
 					ID:          uuid.New(),
@@ -198,7 +221,7 @@ func (s *IntegrationTestSuite) TestReservations() {
 			resp := s.sendRequest(
 				context.Background(),
 				http.MethodPost,
-				reservationsEndpoint,
+				createReservationsEndpoint,
 				requestReservations,
 				nil)
 
@@ -219,11 +242,97 @@ func (s *IntegrationTestSuite) TestReservations() {
 			resp := s.sendRequest(
 				context.Background(),
 				http.MethodPost,
-				reservationsEndpoint,
+				createReservationsEndpoint,
 				requestReservations,
 				nil)
 
 			s.Require().Equal(http.StatusNotFound, resp.StatusCode)
+		})
+
+		s.Run("400", func() {
+			s.Run("invalidUUID", func() {
+				requestReservations := []model.Reservation{
+					{
+						ID:          uuid.Nil,
+						WarehouseID: uuid.Nil,
+						ProductID:   s.products[0].SKU,
+						Quantity:    1,
+						DueDate:     time.Now().Add(time.Hour * 24 * 30),
+					},
+				}
+
+				resp := s.sendRequest(
+					context.Background(),
+					http.MethodPost,
+					createReservationsEndpoint,
+					requestReservations,
+					nil)
+
+				s.Require().Equal(http.StatusBadRequest, resp.StatusCode)
+			})
+
+			s.Run("invalidSKU", func() {
+				requestReservations := []model.Reservation{
+					{
+						ID:          uuid.New(),
+						WarehouseID: s.warehouses[0].ID,
+						ProductID:   s.products[0].SKU + s.products[0].SKU,
+						Quantity:    90,
+						DueDate:     time.Now().Add(time.Hour * 24 * 30),
+					},
+				}
+
+				resp := s.sendRequest(
+					context.Background(),
+					http.MethodPost,
+					createReservationsEndpoint,
+					requestReservations,
+					nil)
+
+				s.Require().Equal(http.StatusBadRequest, resp.StatusCode)
+			})
+
+			s.Run("invalidQuantity", func() {
+				requestReservations := []model.Reservation{
+					{
+						ID:          uuid.New(),
+						WarehouseID: s.warehouses[0].ID,
+						ProductID:   s.products[0].SKU,
+						Quantity:    0,
+						DueDate:     time.Now().Add(time.Hour * 24 * 30),
+					},
+				}
+
+				resp := s.sendRequest(
+					context.Background(),
+					http.MethodPost,
+					createReservationsEndpoint,
+					requestReservations,
+					nil)
+
+				s.Require().Equal(http.StatusBadRequest, resp.StatusCode)
+			})
+
+			s.Run("invalidQuantity", func() {
+				requestReservations := []model.Reservation{
+					{
+						ID:          uuid.New(),
+						WarehouseID: s.warehouses[0].ID,
+						ProductID:   s.products[0].SKU,
+						Quantity:    10,
+						DueDate:     time.Now(),
+					},
+				}
+
+				resp := s.sendRequest(
+					context.Background(),
+					http.MethodPost,
+					createReservationsEndpoint,
+					requestReservations,
+					nil)
+
+				s.Require().Equal(http.StatusBadRequest, resp.StatusCode)
+			})
 		})
 
 		s.Run("200/outdated transaction", func() {
@@ -233,20 +342,26 @@ func (s *IntegrationTestSuite) TestReservations() {
 					WarehouseID: s.warehouses[0].ID,
 					ProductID:   s.products[0].SKU,
 					Quantity:    50,
-					DueDate:     time.Now().Add(time.Second),
+					DueDate:     time.Now().Add(time.Second / 10),
 				},
 			}
+
+			var reservations []model.Reservation
 
 			resp := s.sendRequest(
 				context.Background(),
 				http.MethodPost,
-				reservationsEndpoint,
+				createReservationsEndpoint,
 				requestReservations,
-				nil)
+				&apiserver.HTTPResponse{Data: &reservations})
 
 			s.Require().Equal(http.StatusCreated, resp.StatusCode)
 
-			time.Sleep(time.Second * 2)
+			for _, value := range reservations {
+				s.reservations = append(s.reservations, value)
+			}
+
+			time.Sleep(time.Second / 2)
 
 			requestReservations = []model.Reservation{
 				{
@@ -261,38 +376,180 @@ func (s *IntegrationTestSuite) TestReservations() {
 			resp = s.sendRequest(
 				context.Background(),
 				http.MethodPost,
-				reservationsEndpoint,
+				createReservationsEndpoint,
 				requestReservations,
-				nil)
+				&apiserver.HTTPResponse{Data: &reservations})
+
+			for _, value := range reservations {
+				s.reservations = append(s.reservations, value)
+			}
 
 			s.Require().Equal(http.StatusCreated, resp.StatusCode)
 		})
 	})
 
-	s.Run("DELETE:/reservations", func() {
-		resp := s.sendRequest(
-			context.Background(),
-			http.MethodDelete,
-			reservationsEndpoint,
-			s.reservations,
-			nil,
-		)
+	s.Run("POST:/deleteReservations", func() {
+		s.Run("204", func() {
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				deleteReservationsEndpoint,
+				s.reservations[:3],
+				nil,
+			)
 
-		s.Require().Equal(http.StatusNoContent, resp.StatusCode)
+			s.Require().Equal(http.StatusNoContent, resp.StatusCode)
+		})
+
+		s.Run("400/invalidUUID", func() {
+			requestReservations := []model.Reservation{
+				{
+					ID: uuid.Nil,
+				},
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				deleteReservationsEndpoint,
+				requestReservations,
+				nil,
+			)
+
+			s.Require().Equal(http.StatusBadRequest, resp.StatusCode)
+		})
+
+		s.Run("404", func() {
+			requestReservations := []model.Reservation{
+				{
+					ID: uuid.New(),
+				},
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				deleteReservationsEndpoint,
+				requestReservations,
+				nil,
+			)
+
+			s.Require().Equal(http.StatusNotFound, resp.StatusCode)
+		})
 	})
 
-	s.Run("GET:/warehouses/{id}/stocks", func() {
-		var stocks []model.Stock
+	s.Run("GET:/getStocks", func() {
+		s.Run("200/0-warehouse", func() {
+			var stocks []model.Stock
 
-		resp := s.sendRequest(
-			context.Background(),
-			http.MethodGet,
-			fmt.Sprintf("/warehouses/%s/stocks", s.warehouses[0].ID.String()),
-			nil,
-			&apiserver.HTTPResponse{Data: &stocks})
+			params := model.GetParams{
+				Limit:           10,
+				WarehouseFilter: s.warehouses[0].ID.String(),
+			}
 
-		s.Require().Equal(http.StatusOK, resp.StatusCode)
-		s.Require().Equal(3, len(stocks))
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				getStocksEndpoint,
+				params,
+				&apiserver.HTTPResponse{Data: &stocks})
+
+			s.Require().Equal(http.StatusOK, resp.StatusCode)
+			s.Require().Equal(3, len(stocks))
+		})
+
+		s.Run("200/with-limit", func() {
+			var stocks []model.Stock
+
+			params := model.GetParams{
+				Limit:           1,
+				WarehouseFilter: s.warehouses[0].ID.String(),
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				getStocksEndpoint,
+				params,
+				&apiserver.HTTPResponse{Data: &stocks})
+
+			s.Require().Equal(http.StatusOK, resp.StatusCode)
+			s.Require().Equal(1, len(stocks))
+			s.Require().Equal(uint(50), stocks[0].ReservedQuantity)
+			s.Require().Equal(uint(100), stocks[0].Quantity)
+		})
+
+		s.Run("200/empty-result", func() {
+			var stocks []model.Stock
+
+			params := model.GetParams{
+				Limit:           10,
+				WarehouseFilter: uuid.New().String(),
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				getStocksEndpoint,
+				params,
+				&apiserver.HTTPResponse{Data: &stocks})
+
+			s.Require().Equal(http.StatusOK, resp.StatusCode)
+			s.Require().Equal(0, len(stocks))
+		})
+
+		s.Run("200/sorted", func() {
+			var stocks []model.Stock
+
+			params := model.GetParams{
+				Limit:           10,
+				WarehouseFilter: s.warehouses[0].ID.String(),
+				Sorting:         "reserved_quantity",
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				getStocksEndpoint,
+				params,
+				&apiserver.HTTPResponse{Data: &stocks})
+
+			s.Require().Equal(http.StatusOK, resp.StatusCode)
+			s.Require().Equal(3, len(stocks))
+			s.Require().Equal(uint(0), stocks[0].ReservedQuantity)
+			s.Require().Equal(uint(0), stocks[1].ReservedQuantity)
+			s.Require().Equal(uint(50), stocks[2].ReservedQuantity)
+		})
+
+		s.Run("400", func() {
+			params := model.GetParams{
+				WarehouseFilter: "this is a sql injection",
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				getStocksEndpoint,
+				params,
+				nil)
+
+			s.Require().Equal(http.StatusBadRequest, resp.StatusCode)
+		})
+
+		s.Run("400", func() {
+			params := model.GetParams{
+				ProductFilter: "1231231231234",
+			}
+
+			resp := s.sendRequest(
+				context.Background(),
+				http.MethodPost,
+				getStocksEndpoint,
+				params,
+				nil)
+
+			s.Require().Equal(http.StatusBadRequest, resp.StatusCode)
+		})
 	})
 }
 

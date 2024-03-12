@@ -1,5 +1,3 @@
--- +migrate Up
-
 CREATE TABLE warehouses(
     id uuid primary key,
     name varchar not null,
@@ -36,6 +34,7 @@ CREATE TABLE reservations (
 
 CREATE INDEX idx_reservations_is_active_due_date ON reservations (is_active, due_date);
 
--- +migrate Down
-
-DROP TABLE warehouses, products, stocks, reservations CASCADE;
+CREATE TABLE gorp_migrations (
+    id varchar primary key,
+    applied_at timestamp with time zone
+);

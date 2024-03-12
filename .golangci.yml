@@ -1,0 +1,28 @@
+linters:
+  enable-all: true
+
+  disable:
+    - deadcode
+    - depguard
+    - exhaustive
+    - exhaustivestruct
+    - exhaustruct
+    - golint
+    - gomnd
+    - ifshort
+    - interfacer
+    - ireturn
+    - maligned
+    - nosnakecase
+    - varnamelen
+    - structcheck
+    - scopelint
+    - tagalign
+    - varcheck
+    - wastedassign
+    - funlen
+
+
+run:
+  timeout: 10m
+  tests: false

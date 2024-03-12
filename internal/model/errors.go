@@ -7,39 +7,48 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrObjectAlreadyExists = errors.New("err duplicate request")
+var (
+	ErrObjectAlreadyExists = errors.New("err duplicate request")
+	ErrNoRowsAffected      = errors.New("err no rows affected")
+	ErrInvalidUUID         = errors.New("err invalid uuid")
+	ErrInvalidSKU          = errors.New("err invalid sku")
+	ErrIncorrectDueDate    = errors.New("err incorrect due date")
+	ErrInvalidQuantity     = errors.New("err invalid quantity")
+	ErrInvalidLimit        = errors.New("err invalid limit")
+	ErrInvalidGetParams    = errors.New("err invalid get params")
+)
 
-type ErrDuplicateReservation struct {
+type DuplicateReservationError struct {
 	ReservationID uuid.UUID
 }
 
-func (e ErrDuplicateReservation) Error() string {
-	return fmt.Sprintf("err duplicate reservation of %s", e.ReservationID.String())
+func (e DuplicateReservationError) Error() string {
+	return "err duplicate reservation of " + e.ReservationID.String()
 }
 
-type ErrStockNotFound struct {
+type StockNotFoundError struct {
 	SKU         string
 	WarehouseID uuid.UUID
 }
 
-func (e ErrStockNotFound) Error() string {
+func (e StockNotFoundError) Error() string {
 	return fmt.Sprintf("err stock of %s not found at %s", e.SKU, e.WarehouseID.String())
 }
 
-type ErrNotEnoughQuantity struct {
+type NotEnoughQuantityError struct {
 	SKU              string
 	WarehouseID      uuid.UUID
 	RequiredQuantity uint
 }
 
-func (e ErrNotEnoughQuantity) Error() string {
+func (e NotEnoughQuantityError) Error() string {
 	return fmt.Sprintf("err quantity of %s less than %d at %s", e.SKU, e.RequiredQuantity, e.WarehouseID.String())
 }
 
-type ErrReservationNotFound struct {
+type ReservationNotFoundError struct {
 	ReservationID uuid.UUID
 }
 
-func (e ErrReservationNotFound) Error() string {
+func (e ReservationNotFoundError) Error() string {
 	return fmt.Sprintf("err reservation %s not found", e.ReservationID.String())
 }

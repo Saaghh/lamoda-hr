@@ -7,8 +7,6 @@ import (
 	"net/http"
 
 	"github.com/Saaghh/lamoda-hr/internal/model"
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -21,9 +19,7 @@ type service interface {
 	CreateReservations(ctx context.Context, reservations []model.Reservation) (*[]model.Reservation, error)
 	DeleteReservations(ctx context.Context, reservations []model.Reservation) error
 
-	// TODO: pagination, filtration, sorting
-	GetWarehouseStocks(ctx context.Context, warehouseID uuid.UUID) (*[]model.Stock, error)
-	GetStocks(ctx context.Context) (*[]model.Stock, error)
+	GetStocks(ctx context.Context, params model.GetParams) (*[]model.Stock, error)
 }
 
 func (s *APIServer) createReservations(w http.ResponseWriter, r *http.Request) {
@@ -31,21 +27,41 @@ func (s *APIServer) createReservations(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&reservations); err != nil {
 		writeErrorResponse(w, http.StatusBadRequest, "error reading body")
+
+		return
 	}
 
 	reservations, err := s.service.CreateReservations(r.Context(), *reservations)
 
-	var errDupRes *model.ErrDuplicateReservation
-	var errStockNotFound *model.ErrStockNotFound
-	var errNotEnoughQuant *model.ErrNotEnoughQuantity
+	var (
+		errDuplicateReservation *model.DuplicateReservationError
+		errStockNotFound        *model.StockNotFoundError
+		errNotEnoughQuantity    *model.NotEnoughQuantityError
+	)
 
 	switch {
-	case errors.As(err, &errDupRes):
-		writeErrorResponse(w, http.StatusTooManyRequests, errDupRes.Error())
+	case errors.Is(err, model.ErrInvalidSKU):
+		writeErrorResponse(w, http.StatusBadRequest, "invalid product sku")
 
 		return
-	case errors.As(err, &errNotEnoughQuant):
-		writeErrorResponse(w, http.StatusUnprocessableEntity, errNotEnoughQuant.Error())
+	case errors.Is(err, model.ErrInvalidUUID):
+		writeErrorResponse(w, http.StatusBadRequest, "invalid uuid")
+
+		return
+	case errors.Is(err, model.ErrInvalidQuantity):
+		writeErrorResponse(w, http.StatusBadRequest, "invalid quantity")
+
+		return
+	case errors.Is(err, model.ErrIncorrectDueDate):
+		writeErrorResponse(w, http.StatusBadRequest, "incorrect due date")
+
+		return
+	case errors.As(err, &errDuplicateReservation):
+		writeErrorResponse(w, http.StatusTooManyRequests, errDuplicateReservation.Error())
+
+		return
+	case errors.As(err, &errNotEnoughQuantity):
+		writeErrorResponse(w, http.StatusUnprocessableEntity, errNotEnoughQuantity.Error())
 
 		return
 	case errors.As(err, &errStockNotFound):
@@ -72,9 +88,13 @@ func (s *APIServer) deleteReservations(w http.ResponseWriter, r *http.Request) {
 
 	err := s.service.DeleteReservations(r.Context(), *reservations)
 
-	var errReservationNotFound *model.ErrReservationNotFound
+	var errReservationNotFound *model.ReservationNotFoundError
 
 	switch {
+	case errors.Is(err, model.ErrInvalidUUID):
+		writeErrorResponse(w, http.StatusBadRequest, "invalid uuid")
+
+		return
 	case errors.As(err, &errReservationNotFound):
 		writeErrorResponse(w, http.StatusNotFound, errReservationNotFound.Error())
 
@@ -90,34 +110,26 @@ func (s *APIServer) deleteReservations(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *APIServer) getWarehouseStocks(w http.ResponseWriter, r *http.Request) {
-	warehouseID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "error reading warehouse id")
-
-		return
-	}
-
-	stocks, err := s.service.GetWarehouseStocks(r.Context(), warehouseID)
-
-	switch {
-	case err != nil:
-		zap.L().With(zap.Error(err)).Warn("getWarehouseStocks/s.service.GetWarehouseStocks(r.Context(), warehouseID)")
-
-		writeErrorResponse(w, http.StatusInternalServerError, "internal server error")
-
-		return
-	}
-
-	writeOkResponse(w, http.StatusOK, stocks)
-}
-
 func (s *APIServer) getStocks(w http.ResponseWriter, r *http.Request) {
-	stocks, err := s.service.GetStocks(r.Context())
+	var params model.GetParams
+
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		writeErrorResponse(w, http.StatusBadRequest, "error reading body")
+
+		return
+	}
+
+	stocks, err := s.service.GetStocks(r.Context(), params)
 
 	switch {
+	case errors.Is(err, model.ErrInvalidSKU):
+		fallthrough
+	case errors.Is(err, model.ErrInvalidGetParams):
+		writeErrorResponse(w, http.StatusBadRequest, "invalid get params")
+
+		return
 	case err != nil:
-		zap.L().With(zap.Error(err)).Warn("getStocks/s.service.GetStocks(r.Context())")
+		zap.L().With(zap.Error(err)).Warn("getStocks/s.service.GetWarehouseStocks(r.Context(), warehouseID)")
 
 		writeErrorResponse(w, http.StatusInternalServerError, "internal server error")
 

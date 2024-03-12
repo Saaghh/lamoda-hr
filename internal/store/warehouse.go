@@ -4,49 +4,47 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Saaghh/lamoda-hr/internal/model"
-	"github.com/google/uuid"
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
 )
 
-func (p *Postgres) TruncateTables(ctx context.Context) error {
-	_, err := p.db.Exec(
-		ctx,
-		"TRUNCATE TABLE product_movements CASCADE")
-	if err != nil {
-		return fmt.Errorf("p.db.Exec(...): %w", err)
-	}
+func (p *Postgres) DeleteRow(ctx context.Context, object any) error {
+	switch v := object.(type) {
+	case model.Stock:
+		query := `DELETE FROM stocks WHERE product_id = $1 and warehouse_id = $2`
 
-	_, err = p.db.Exec(
-		ctx,
-		"TRUNCATE TABLE reservations CASCADE")
-	if err != nil {
-		return fmt.Errorf("p.db.Exec(...): %w", err)
-	}
+		_, err := p.db.Exec(ctx, query, v.ProductID, v.WarehouseID)
+		if err != nil {
+			return fmt.Errorf("p.db.Exec(ctx, query, v.ProductID, v.WarehouseID): %w", err)
+		}
+	case model.Reservation:
+		query := `DELETE FROM reservations WHERE id = $1`
 
-	_, err = p.db.Exec(
-		ctx,
-		"TRUNCATE TABLE stocks CASCADE")
-	if err != nil {
-		return fmt.Errorf("p.db.Exec(...): %w", err)
-	}
+		_, err := p.db.Exec(ctx, query, v.ID)
+		if err != nil {
+			return fmt.Errorf("p.db.Exec(ctx, query, v.ID): %w", err)
+		}
+	case model.Product:
+		query := `DELETE FROM products WHERE sku = $1`
 
-	_, err = p.db.Exec(
-		ctx,
-		"TRUNCATE TABLE products CASCADE")
-	if err != nil {
-		return fmt.Errorf("p.db.Exec(...): %w", err)
-	}
+		_, err := p.db.Exec(ctx, query, v.SKU)
+		if err != nil {
+			return fmt.Errorf("p.db.Exec(ctx, query, v.SKU): %w", err)
+		}
+	case model.Warehouse:
+		query := `DELETE FROM warehouses WHERE id = $1`
 
-	_, err = p.db.Exec(
-		ctx,
-		"TRUNCATE TABLE warehouses CASCADE")
-	if err != nil {
-		return fmt.Errorf("p.db.Exec(...): %w", err)
+		_, err := p.db.Exec(ctx, query, v.ID)
+		if err != nil {
+			return fmt.Errorf("p.db.Exec(ctx, query, v.ID): %w", err)
+		}
+	default:
+		return errors.ErrUnsupported
 	}
 
 	return nil
@@ -104,8 +102,8 @@ func (p *Postgres) CreateProduct(ctx context.Context, product model.Product) (*m
 
 func (p *Postgres) CreateStock(ctx context.Context, stock model.Stock) (*model.Stock, error) {
 	query := `
-	INSERT INTO stocks (warehouse_id, product_id, quantity) 
-	VALUES ($1, $2, $3)
+	INSERT INTO stocks (warehouse_id, product_id, quantity, reserved_quantity) 
+	VALUES ($1, $2, $3, 0)
 	RETURNING created_at, modified_at`
 
 	err := p.db.QueryRow(
@@ -126,11 +124,7 @@ func (p *Postgres) CreateStock(ctx context.Context, stock model.Stock) (*model.S
 }
 
 func (p *Postgres) CreateReservations(ctx context.Context, reservations []model.Reservation) (*[]model.Reservation, error) {
-	if err := p.DeactivateDueReservations(ctx); err != nil {
-		return nil, fmt.Errorf("p.DeactivateDueReservations(ctx): %w", err)
-	}
-
-	tx, err := p.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("p.db.Begin(ctx): %w", err)
 	}
@@ -143,10 +137,9 @@ func (p *Postgres) CreateReservations(ctx context.Context, reservations []model.
 	}()
 
 	for i, value := range reservations {
-
 		query := `
 		UPDATE stocks 
-		SET quantity = quantity - $1, modified_at = now() 
+		SET reserved_quantity = reserved_quantity + $1, modified_at = now() 
 		WHERE warehouse_id = $2 AND product_id = $3
 		RETURNING modified_at, quantity`
 
@@ -167,13 +160,13 @@ func (p *Postgres) CreateReservations(ctx context.Context, reservations []model.
 
 		switch {
 		case errors.As(err, &pgErr) && pgErr.Code == pgerrcode.CheckViolation:
-			return nil, &model.ErrNotEnoughQuantity{
+			return nil, &model.NotEnoughQuantityError{
 				SKU:              value.ProductID,
 				RequiredQuantity: value.Quantity,
 				WarehouseID:      value.WarehouseID,
 			}
 		case errors.Is(err, pgx.ErrNoRows):
-			return nil, &model.ErrStockNotFound{
+			return nil, &model.StockNotFoundError{
 				SKU:         value.ProductID,
 				WarehouseID: value.WarehouseID,
 			}
@@ -182,18 +175,17 @@ func (p *Postgres) CreateReservations(ctx context.Context, reservations []model.
 		}
 
 		query = `
-		INSERT INTO reservations (id, warehouse_id, product_id, quantity, created_at, due_date) 
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO reservations (id, warehouse_id, product_id, quantity, due_date) 
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, warehouse_id, product_id, quantity, created_at, due_date`
 
-		err = p.db.QueryRow(
+		err = tx.QueryRow(
 			ctx,
 			query,
 			value.ID,
 			value.WarehouseID,
 			value.ProductID,
 			value.Quantity,
-			value.CreatedAt,
 			value.DueDate,
 		).Scan(
 			&reservations[i].ID,
@@ -206,10 +198,9 @@ func (p *Postgres) CreateReservations(ctx context.Context, reservations []model.
 
 		switch {
 		case errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation:
-			return nil, &model.ErrDuplicateReservation{ReservationID: value.ID}
+			return nil, &model.DuplicateReservationError{ReservationID: value.ID}
 		case err != nil:
 			return nil, fmt.Errorf("p.db.QueryRow(%s): %w", query, err)
-
 		}
 	}
 
@@ -221,8 +212,9 @@ func (p *Postgres) CreateReservations(ctx context.Context, reservations []model.
 	return &reservations, nil
 }
 
+//nolint:cyclop
 func (p *Postgres) DeactivateDueReservations(ctx context.Context) error {
-	tx, err := p.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("p.db.Begin(ctx): %w", err)
 	}
@@ -230,7 +222,7 @@ func (p *Postgres) DeactivateDueReservations(ctx context.Context) error {
 	defer func() {
 		err := tx.Rollback(ctx)
 		if err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			zap.L().With(zap.Error(err)).Warn("CreateReservations/tx.Rollback(ctx)")
+			zap.L().With(zap.Error(err)).Warn("DeactivateDueReservations/tx.Rollback(ctx)")
 		}
 	}()
 
@@ -240,8 +232,6 @@ func (p *Postgres) DeactivateDueReservations(ctx context.Context) error {
 	WHERE due_date < now() AND is_active = true 
 	RETURNING product_id, warehouse_id, quantity`
 
-	func() {
-	}()
 	rows, err := tx.Query(
 		ctx,
 		query)
@@ -272,24 +262,26 @@ func (p *Postgres) DeactivateDueReservations(ctx context.Context) error {
 		return nil
 	}
 
-	rows.Close()
-
 	for _, value := range releasedReservations {
 		query = `
 		UPDATE stocks 
-		SET quantity = quantity + $1, modified_at = now() 
+		SET reserved_quantity = reserved_quantity - $1, modified_at = now() 
 		WHERE product_id = $2 and warehouse_id = $3
-		RETURNING modified_at, quantity`
+		RETURNING modified_at, reserved_quantity`
 
-		err = tx.QueryRow(
+		commandTag, err := tx.Exec(
 			ctx,
 			query,
 			value.Quantity,
 			value.ProductID,
 			value.WarehouseID,
-		).Scan(nil, nil)
+		)
 		if err != nil {
-			return fmt.Errorf("tx.QueryRow(%s): %w", query, err)
+			return fmt.Errorf("tx.Exec(%s): %w", query, err)
+		}
+
+		if commandTag.RowsAffected() != 1 {
+			return fmt.Errorf("tx.Exec(%s): %w", query, model.ErrNoRowsAffected)
 		}
 	}
 
@@ -301,7 +293,7 @@ func (p *Postgres) DeactivateDueReservations(ctx context.Context) error {
 }
 
 func (p *Postgres) DeleteReservations(ctx context.Context, reservations []model.Reservation) error {
-	tx, err := p.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	tx, err := p.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("p.db.Begin(ctx): %w", err)
 	}
@@ -309,49 +301,54 @@ func (p *Postgres) DeleteReservations(ctx context.Context, reservations []model.
 	defer func() {
 		err := tx.Rollback(ctx)
 		if err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			zap.L().With(zap.Error(err)).Warn("CreateReservations/tx.Rollback(ctx)")
+			zap.L().With(zap.Error(err)).Warn("DeleteReservations/tx.Rollback(ctx)")
 		}
 	}()
 
 	for _, value := range reservations {
+		reservation := value
 		query := `
 			UPDATE reservations 
 			SET is_active = false 
-			WHERE is_active = true AND id = $1 
+			WHERE is_active = true AND id = $1
 			RETURNING product_id, warehouse_id, quantity`
 
 		err := tx.QueryRow(
 			ctx,
 			query,
-			value.ID,
+			reservation.ID,
 		).Scan(
-			&value.ProductID,
-			&value.WarehouseID,
-			&value.Quantity,
+			&reservation.ProductID,
+			&reservation.WarehouseID,
+			&reservation.Quantity,
 		)
 
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			return &model.ErrReservationNotFound{ReservationID: value.ID}
+			return &model.ReservationNotFoundError{ReservationID: reservation.ID}
 		case err != nil:
 			return fmt.Errorf("tx.QueryRow(%s): %w", query, err)
 		}
 
 		query = `
 		UPDATE stocks 
-		SET quantity = quantity + $1, modified_at = now() 
+		SET reserved_quantity = reserved_quantity - $1, modified_at = now() 
 		WHERE warehouse_id = $2 AND product_id = $3
 		RETURNING modified_at`
 
-		err = tx.QueryRow(
+		commandTag, err := tx.Exec(
 			ctx,
 			query,
-			value.Quantity,
-			value.WarehouseID,
-			value.ProductID,
-		).Scan(nil)
+			reservation.Quantity,
+			reservation.WarehouseID,
+			reservation.ProductID,
+		)
 		if err != nil {
-			return fmt.Errorf("tx.QueryRow(...): %w", err)
+			return fmt.Errorf("tx.QueryRow(%s): %w", query, err)
+		}
+
+		if commandTag.RowsAffected() != 1 {
+			return fmt.Errorf("\"tx.QueryRow(%s): %w", query, model.ErrNoRowsAffected)
 		}
 	}
 
@@ -362,18 +359,35 @@ func (p *Postgres) DeleteReservations(ctx context.Context, reservations []model.
 	return nil
 }
 
-func (p *Postgres) GetWarehouseStocks(ctx context.Context, warehouseID uuid.UUID) (*[]model.Stock, error) {
-	err := p.DeactivateDueReservations(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("p.DeactivateDueReservations(ctx): %w", err)
+func (p *Postgres) GetStocks(ctx context.Context, params model.GetParams) (*[]model.Stock, error) {
+	query := `SELECT warehouse_id, product_id, quantity, reserved_quantity, created_at, modified_at FROM stocks `
+
+	var conditions []string
+
+	if params.WarehouseFilter != "" {
+		conditions = append(conditions, fmt.Sprintf("warehouse_id = '%s'", params.WarehouseFilter))
 	}
 
-	query := `SELECT warehouse_id, product_id, quantity, created_at, modified_at FROM stocks WHERE warehouse_id = $1`
+	if params.ProductFilter != "" {
+		conditions = append(conditions, fmt.Sprintf("product_id = '%s'", params.ProductFilter))
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	if params.Sorting != "" {
+		query += " ORDER BY " + params.Sorting
+		if params.Descending {
+			query += " DESC"
+		}
+	}
+
+	query += fmt.Sprintf(" OFFSET %d LIMIT %d", params.Offset, params.Limit)
 
 	rows, err := p.db.Query(
 		ctx,
-		query,
-		warehouseID)
+		query)
 	if err != nil {
 		return nil, fmt.Errorf("p.db.Query(%s): %w", query, err)
 	}
@@ -389,19 +403,15 @@ func (p *Postgres) GetWarehouseStocks(ctx context.Context, warehouseID uuid.UUID
 			&stock.WarehouseID,
 			&stock.ProductID,
 			&stock.Quantity,
+			&stock.ReservedQuantity,
 			&stock.CreatedAt,
 			&stock.ModifiedAt)
 		if err != nil {
-			return nil, fmt.Errorf("rows.Scan(...): %w", err)
+			return nil, fmt.Errorf("rows.Scan(%s): %w", query, err)
 		}
 
 		stocks = append(stocks, stock)
 	}
 
 	return &stocks, nil
-}
-
-func (p *Postgres) GetStocks(ctx context.Context) (*[]model.Stock, error) {
-	// TODO implement me
-	panic("implement me")
 }

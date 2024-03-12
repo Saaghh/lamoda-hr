@@ -14,7 +14,7 @@ type Config struct {
 	PGUser     string `env:"PG_USER" env-default:"user"`
 	PGPassword string `env:"PG_PASSWORD" env-default:"secret"`
 
-	XRBindAddr string `env:"XR_BIND_ADDR" env-default:":3030"`
+	DeactivatorPeriod string `env:"DEACTIVATOR_PERIOD" env-default:"5m"`
 }
 
 func New() *Config {
